@@ -512,7 +512,7 @@ function renderResultsStep() {
           <button id="newResponseBtn" class="btn btn-secondary" type="button">
             New response
           </button>
-          <button id="openFeedbackBtn" class="btn btn-secondary" type="button">
+          <button id="openFeedbackBtn" class="btn btn-primary feedback-cta" type="button">
             Leave anonymous feedback
           </button>
         </div>
