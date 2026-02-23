@@ -8,6 +8,8 @@ import {
 } from "./report.js";
 
 const STORAGE_KEY = "ds_diag_wizard_state_v1";
+const REPORTS_STORAGE_KEY = "ds_diag_reports_v1";
+const MAX_SAVED_REPORTS = 25;
 const TOTAL_STEPS = 3;
 
 const state = {
@@ -26,9 +28,26 @@ const progressFill = document.getElementById("progressFill");
 /** @type {Chart | null} */
 let chartInstance = null;
 
+function readStorage(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function restoreState() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readStorage(STORAGE_KEY);
     if (!raw) return;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return;
@@ -48,7 +67,7 @@ function restoreState() {
 }
 
 function persistState() {
-  localStorage.setItem(
+  writeStorage(
     STORAGE_KEY,
     JSON.stringify({
       currentStep: state.currentStep,
@@ -209,6 +228,59 @@ function getComputedReport() {
   return { reportModel, summary, guidance, risks };
 }
 
+function getStateFingerprint() {
+  const context = Object.entries(state.contextResponses)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}:${v}`)
+    .join("|");
+  const maturity = Object.entries(state.responses)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}:${v}`)
+    .join("|");
+  return `${context}::${maturity}`;
+}
+
+function loadSavedReports() {
+  try {
+    const raw = readStorage(REPORTS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveReportSnapshot(reportModel, summary, guidance) {
+  const reports = loadSavedReports();
+  const fingerprint = getStateFingerprint();
+  const existing = reports[0];
+  if (existing && existing.fingerprint === fingerprint) {
+    return reports;
+  }
+
+  const record = {
+    timestamp: new Date().toISOString(),
+    fingerprint,
+    summary,
+    SSI: Number(reportModel.SSI || 0),
+    OPI: Number(reportModel.operationalPressure?.OPI || 0),
+    adequacyGap: Number(reportModel.adequacyGap || 0),
+    risks: [...(reportModel.risks?.flags || [])],
+    guidance: [...guidance],
+  };
+
+  const next = [record, ...reports].slice(0, MAX_SAVED_REPORTS);
+  writeStorage(REPORTS_STORAGE_KEY, JSON.stringify(next));
+  return next;
+}
+
+function formatLocalTimestamp(isoString) {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return "Unknown time";
+  return date.toLocaleString();
+}
+
 function buildExportPayload(reportModel, guidance) {
   /** @type {Record<string, {avg: number, score100: number}>} */
   const dimensionScores = {};
@@ -281,6 +353,7 @@ async function copySummaryToClipboard() {
 
 function renderResultsStep() {
   const { reportModel, summary, guidance, risks } = getComputedReport();
+  const savedReports = saveReportSnapshot(reportModel, summary, guidance);
   const strengths = generateStrengths(reportModel);
   const weaknesses = generateWeaknesses(reportModel);
   const adequacyStatus = getAdequacyStatus(reportModel.adequacyGap);
@@ -295,6 +368,20 @@ function renderResultsStep() {
     ? risks.map((risk) => `<li>${risk}</li>`).join("")
     : '<li class="good">No strong gap signals were detected in this response set.</li>';
   const guidanceHtml = guidance.map((tip) => `<li>${tip}</li>`).join("");
+  const historyHtml = savedReports.length
+    ? savedReports
+        .map((item) => {
+          const status = getAdequacyStatus(Number(item.adequacyGap || 0));
+          return `<li>
+            <strong>${formatLocalTimestamp(item.timestamp)}</strong>
+            <span> · SSI ${Number(item.SSI || 0).toFixed(1)}</span>
+            <span> · OPI ${Number(item.OPI || 0).toFixed(1)}</span>
+            <span> · Gap ${Number(item.adequacyGap || 0).toFixed(1)}</span>
+            <span class="chip ${status.className}">${status.label}</span>
+          </li>`;
+        })
+        .join("")
+    : "<li>No saved report yet.</li>";
 
   wizardContent.innerHTML = `
     <div class="results-grid">
@@ -357,7 +444,15 @@ function renderResultsStep() {
           <button id="copySummaryBtn" class="btn btn-secondary" type="button">
             Copy summary
           </button>
+          <button id="newResponseBtn" class="btn btn-secondary" type="button">
+            New response
+          </button>
         </div>
+      </div>
+
+      <div class="panel">
+        <h3>Saved reports on this browser</h3>
+        <ul class="history-list">${historyHtml}</ul>
       </div>
     </div>
   `;
@@ -368,6 +463,16 @@ function renderResultsStep() {
 function renderResultsChart(reportModel) {
   const canvas = document.getElementById("resultsChart");
   if (!canvas) return;
+  if (typeof Chart === "undefined") {
+    const panel = canvas.closest(".panel");
+    if (panel) {
+      panel.insertAdjacentHTML(
+        "beforeend",
+        '<p class="help-text">Chart unavailable. Your report metrics are still listed above.</p>'
+      );
+    }
+    return;
+  }
 
   if (chartInstance) {
     chartInstance.destroy();
@@ -489,6 +594,15 @@ async function handleWizardClick(event) {
     window.setTimeout(() => {
       target.textContent = originalLabel;
     }, 1200);
+    return;
+  }
+
+  if (target.id === "newResponseBtn") {
+    state.currentStep = 1;
+    state.contextResponses = {};
+    state.responses = {};
+    persistState();
+    render();
   }
 }
 
