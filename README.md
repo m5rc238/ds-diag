@@ -43,7 +43,7 @@ Because this project uses ES modules, run it from a local HTTP server (not `file
 ### Option 1: Python
 
 ```bash
-cd /Users/ahkeewan/Documents/Projects/ds-diag
+cd /ProjectFolder
 python3 -m http.server 8000
 ```
 
@@ -52,7 +52,7 @@ Open: `http://localhost:8000`
 ### Option 2: Node
 
 ```bash
-npx serve /Users/ahkeewan/Documents/Projects/ds-diag
+npx serve /ProjectFolder
 ```
 
 ## Scoring Notes
@@ -71,12 +71,3 @@ This project is connected to:
 - URL: `https://github.com/m5rc238/ds-diag.git`
 - Default branch: `main`
 
-Useful commands:
-
-```bash
-cd /Users/ahkeewan/Documents/Projects/ds-diag
-git status
-git add -A
-git commit -m "docs: add project README and repo setup"
-git push -u origin main
-```
