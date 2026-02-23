@@ -185,6 +185,9 @@ body {
 .kpi-label {
   color: var(--muted);
   font-size: 0.84rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .kpi-value {
@@ -229,6 +232,47 @@ body {
 .panel h3 {
   margin: 0 0 0.45rem;
   font-size: 0.98rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.info-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 50%;
+  border: 1px solid #c7d0e3;
+  background: #f1f5ff;
+  color: #204180;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
+
+.info-tip:hover::after,
+.info-tip:focus-visible::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  transform: translateX(-50%);
+  width: min(280px, 70vw);
+  padding: 0.48rem 0.58rem;
+  border-radius: 8px;
+  border: 1px solid #d8dfef;
+  background: #ffffff;
+  color: #273553;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.16);
+  z-index: 20;
+  text-align: left;
+  font-weight: 500;
 }
 
 .panel ul {

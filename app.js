@@ -86,6 +86,19 @@ function titleCase(value) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function escapeAttr(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function infoTip(text) {
+  const safeText = escapeAttr(text);
+  return `<span class="info-tip" tabindex="0" role="img" aria-label="${safeText}" data-tooltip="${safeText}" title="${safeText}">i</span>`;
+}
+
 function clearValidation() {
   validationMessage.textContent = "";
 }
@@ -156,6 +169,7 @@ function renderStructuralStep() {
   const html = `
     <h2 class="section-title">${title}</h2>
     <p class="section-subtitle">${description}</p>
+    <p class="help-text">Scoring guide: 0 = Absent, 1 = Informal/ad hoc, 2 = Defined but inconsistent, 3 = Operationalized/enforced.</p>
     ${dimensions
       .map((dimension) => {
         const key = dimension.toLowerCase();
@@ -447,15 +461,15 @@ function renderResultsStep() {
 
       <div class="kpis">
         <div class="kpi">
-          <div class="kpi-label">SSI</div>
+          <div class="kpi-label">SSI ${infoTip("System Strength Index. Overall structural maturity score from your responses, normalized to 0-100.")}</div>
           <div class="kpi-value">${reportModel.SSI.toFixed(1)}</div>
         </div>
         <div class="kpi">
-          <div class="kpi-label">OPI</div>
+          <div class="kpi-label">OPI ${infoTip("Operational Pressure Index. Context-derived pressure based on team scale, complexity, release pace, AI use, and tooling fragmentation.")}</div>
           <div class="kpi-value">${reportModel.operationalPressure.OPI.toFixed(1)}</div>
         </div>
         <div class="kpi">
-          <div class="kpi-label">Adequacy Gap</div>
+          <div class="kpi-label">Adequacy Gap ${infoTip("SSI minus OPI. Negative means maturity is below current pressure; positive means maturity exceeds current pressure.")}</div>
           <div class="kpi-value ${reportModel.adequacyGap < 0 ? "risk" : "good"}">${reportModel.adequacyGap.toFixed(
             1
           )}</div>
@@ -467,14 +481,14 @@ function renderResultsStep() {
       </div>
 
       <div class="panel">
-        <h3>Actual maturity vs operational pressure (OPI)</h3>
+        <h3>Actual maturity vs operational pressure (OPI) ${infoTip("Blue bars show current maturity by dimension. Red bars show pressure threshold (OPI). Bigger shortfalls indicate higher delivery risk.")}</h3>
         <div class="chart-shell">
           <canvas id="resultsChart"></canvas>
         </div>
       </div>
 
       <div class="panel">
-        <h3>Multi-dimension profile</h3>
+        <h3>Multi-dimension profile ${infoTip("Radar view of all dimensions at once. Wider blue area indicates stronger overall design system capability.")}</h3>
         <div class="chart-shell chart-shell-radar">
           <canvas id="dimensionsChart"></canvas>
         </div>
@@ -491,7 +505,7 @@ function renderResultsStep() {
       </div>
 
       <div class="panel">
-        <h3>Potential signals to monitor</h3>
+        <h3>Potential signals to monitor ${infoTip("These are risk flags inferred from combinations of context pressure and structural maturity answers.")}</h3>
         <ul>${risksHtml}</ul>
       </div>
 
