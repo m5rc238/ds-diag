@@ -11,6 +11,7 @@ const STORAGE_KEY = "ds_diag_wizard_state_v1";
 const REPORTS_STORAGE_KEY = "ds_diag_reports_v1";
 const MAX_SAVED_REPORTS = 25;
 const TOTAL_STEPS = 3;
+const FEEDBACK_FORM_URL = (document.body?.dataset.feedbackFormUrl || "").trim();
 
 const state = {
   currentStep: 1,
@@ -25,8 +26,11 @@ const nextBtn = document.getElementById("nextBtn");
 const stepLabel = document.getElementById("stepLabel");
 const progressFill = document.getElementById("progressFill");
 
-/** @type {Chart | null} */
-let chartInstance = null;
+/** @type {{ maturity: Chart | null, dimensions: Chart | null }} */
+const chartInstances = {
+  maturity: null,
+  dimensions: null,
+};
 
 function readStorage(key) {
   try {
@@ -214,6 +218,56 @@ function getAdequacyStatus(gap) {
   return { label: "Balanced", className: "balanced" };
 }
 
+/**
+ * Returns a scriptable gradient fill callback for Chart.js datasets.
+ * @param {string[]} colors
+ * @returns {(context: { chart: Chart }) => CanvasGradient | string}
+ */
+function createGradientFill(colors) {
+  return (context) => {
+    const chart = context.chart;
+    const { ctx, chartArea } = chart;
+    if (!chartArea) {
+      return colors[0];
+    }
+    const gradient = ctx.createLinearGradient(
+      chartArea.left,
+      chartArea.top,
+      chartArea.right,
+      chartArea.top
+    );
+    const step = colors.length > 1 ? 1 / (colors.length - 1) : 1;
+    colors.forEach((color, index) => {
+      gradient.addColorStop(step * index, color);
+    });
+    return gradient;
+  };
+}
+
+function destroyCharts() {
+  if (chartInstances.maturity) {
+    chartInstances.maturity.destroy();
+    chartInstances.maturity = null;
+  }
+  if (chartInstances.dimensions) {
+    chartInstances.dimensions.destroy();
+    chartInstances.dimensions = null;
+  }
+}
+
+function getFeedbackEmbedUrl() {
+  if (!FEEDBACK_FORM_URL) return "";
+  try {
+    const url = new URL(FEEDBACK_FORM_URL);
+    if (!url.hostname.includes("google.com")) return FEEDBACK_FORM_URL;
+    if (!url.pathname.includes("/forms/")) return FEEDBACK_FORM_URL;
+    url.searchParams.set("embedded", "true");
+    return url.toString();
+  } catch {
+    return FEEDBACK_FORM_URL;
+  }
+}
+
 function getComputedReport() {
   const reportModel = computeReportModel({
     responses: state.responses,
@@ -354,6 +408,8 @@ async function copySummaryToClipboard() {
 function renderResultsStep() {
   const { reportModel, summary, guidance, risks } = getComputedReport();
   const savedReports = saveReportSnapshot(reportModel, summary, guidance);
+  const feedbackEmbedUrl = getFeedbackEmbedUrl();
+  const feedbackConfigured = Boolean(feedbackEmbedUrl);
   const strengths = generateStrengths(reportModel);
   const weaknesses = generateWeaknesses(reportModel);
   const adequacyStatus = getAdequacyStatus(reportModel.adequacyGap);
@@ -412,7 +468,16 @@ function renderResultsStep() {
 
       <div class="panel">
         <h3>Actual maturity vs operational pressure (OPI)</h3>
-        <canvas id="resultsChart" height="260"></canvas>
+        <div class="chart-shell">
+          <canvas id="resultsChart"></canvas>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Multi-dimension profile</h3>
+        <div class="chart-shell chart-shell-radar">
+          <canvas id="dimensionsChart"></canvas>
+        </div>
       </div>
 
       <div class="panel">
@@ -447,12 +512,41 @@ function renderResultsStep() {
           <button id="newResponseBtn" class="btn btn-secondary" type="button">
             New response
           </button>
+          <button id="openFeedbackBtn" class="btn btn-secondary" type="button">
+            Leave anonymous feedback
+          </button>
         </div>
       </div>
 
       <div class="panel">
         <h3>Saved reports on this browser</h3>
         <ul class="history-list">${historyHtml}</ul>
+      </div>
+    </div>
+
+    <div id="feedbackModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="feedbackTitle">
+      <div class="modal-card">
+        <h3 id="feedbackTitle">Anonymous feedback</h3>
+        <p class="help-text">Your response will be submitted through Google Forms.</p>
+        ${
+          feedbackConfigured
+            ? `<iframe
+                id="feedbackFrame"
+                class="feedback-iframe"
+                src="${feedbackEmbedUrl}"
+                title="Anonymous feedback form"
+                loading="lazy"
+              ></iframe>`
+            : `<p class="risk">Feedback form is not configured yet. Add the form URL in <code>index.html</code> body <code>data-feedback-form-url</code>.</p>`
+        }
+        <div class="inline-actions">
+          <button id="closeFeedbackBtn" class="btn btn-secondary" type="button">Close</button>
+          ${
+            feedbackConfigured
+              ? `<a id="openFeedbackExternalLink" class="btn btn-primary feedback-link-btn" target="_blank" rel="noopener noreferrer" href="${FEEDBACK_FORM_URL}">Open in new tab</a>`
+              : ""
+          }
+        </div>
       </div>
     </div>
   `;
@@ -462,7 +556,9 @@ function renderResultsStep() {
 
 function renderResultsChart(reportModel) {
   const canvas = document.getElementById("resultsChart");
+  const dimensionsCanvas = document.getElementById("dimensionsChart");
   if (!canvas) return;
+  if (!dimensionsCanvas) return;
   if (typeof Chart === "undefined") {
     const panel = canvas.closest(".panel");
     if (panel) {
@@ -474,16 +570,13 @@ function renderResultsChart(reportModel) {
     return;
   }
 
-  if (chartInstance) {
-    chartInstance.destroy();
-    chartInstance = null;
-  }
+  destroyCharts();
 
   const dimensions = Object.keys(reportModel.dimensionScores || {});
   const actualScores = dimensions.map((key) => reportModel.dimensionScores[key].score100);
   const opiThreshold = dimensions.map(() => reportModel.operationalPressure.OPI);
 
-  chartInstance = new Chart(canvas, {
+  chartInstances.maturity = new Chart(canvas, {
     type: "bar",
     data: {
       labels: dimensions.map((d) => titleCase(d)),
@@ -491,7 +584,10 @@ function renderResultsChart(reportModel) {
         {
           label: "Actual maturity",
           data: actualScores,
-          backgroundColor: "rgba(31, 111, 235, 0.65)",
+          backgroundColor: createGradientFill([
+            "rgba(31, 111, 235, 0.75)",
+            "rgba(56, 189, 248, 0.75)",
+          ]),
           borderColor: "rgba(31, 111, 235, 1)",
           borderWidth: 1,
         },
@@ -515,6 +611,52 @@ function renderResultsChart(reportModel) {
           title: {
             display: true,
             text: "Score (0-100)",
+          },
+        },
+      },
+      plugins: {
+        legend: {
+          position: "bottom",
+        },
+      },
+    },
+  });
+
+  chartInstances.dimensions = new Chart(dimensionsCanvas, {
+    type: "radar",
+    data: {
+      labels: dimensions.map((d) => titleCase(d)),
+      datasets: [
+        {
+          label: "Actual maturity",
+          data: actualScores,
+          fill: true,
+          backgroundColor: "rgba(31, 111, 235, 0.22)",
+          borderColor: "rgba(31, 111, 235, 0.95)",
+          pointBackgroundColor: "rgba(31, 111, 235, 1)",
+          pointRadius: 3,
+        },
+        {
+          label: "Operational pressure (OPI)",
+          data: opiThreshold,
+          fill: true,
+          backgroundColor: "rgba(180, 35, 24, 0.14)",
+          borderColor: "rgba(180, 35, 24, 0.85)",
+          pointBackgroundColor: "rgba(180, 35, 24, 0.95)",
+          pointRadius: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        r: {
+          beginAtZero: true,
+          min: 0,
+          max: 100,
+          ticks: {
+            stepSize: 20,
           },
         },
       },
@@ -554,6 +696,12 @@ function validateStep() {
 
   clearValidation();
   return true;
+}
+
+function toggleFeedbackModal(open) {
+  const modal = document.getElementById("feedbackModal");
+  if (!modal) return;
+  modal.classList.toggle("hidden", !open);
 }
 
 function handleAnswerChange(event) {
@@ -603,6 +751,24 @@ async function handleWizardClick(event) {
     state.responses = {};
     persistState();
     render();
+    return;
+  }
+
+  if (target.id === "openFeedbackBtn") {
+    if (!getFeedbackEmbedUrl()) {
+      setValidation(
+        "Feedback form is not configured. Add your Google Form URL to data-feedback-form-url in index.html."
+      );
+      return;
+    }
+    clearValidation();
+    toggleFeedbackModal(true);
+    return;
+  }
+
+  if (target.id === "closeFeedbackBtn") {
+    toggleFeedbackModal(false);
+    return;
   }
 }
 
@@ -611,11 +777,13 @@ function render() {
   clearValidation();
 
   if (state.currentStep === 1) {
+    destroyCharts();
     renderContextStep();
     return;
   }
 
   if (state.currentStep === 2) {
+    destroyCharts();
     renderStructuralStep();
     return;
   }
@@ -648,6 +816,17 @@ function goNext() {
 function bindEvents() {
   wizardContent.addEventListener("change", handleAnswerChange);
   wizardContent.addEventListener("click", handleWizardClick);
+  wizardContent.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.id === "feedbackModal") {
+      toggleFeedbackModal(false);
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      toggleFeedbackModal(false);
+    }
+  });
   backBtn.addEventListener("click", goBack);
   nextBtn.addEventListener("click", goNext);
 }
